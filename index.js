@@ -6,22 +6,6 @@ const pdfParse = require("pdf-parse");
 const sharp = require("sharp");
 const fs = require("fs");
 
-// ✅ MODERN MATHJAX
-const MathJax =
-    require("mathjax-full/js/mathjax.js").mathjax;
-
-const TeX =
-    require("mathjax-full/js/input/tex.js").TeX;
-
-const SVG =
-    require("mathjax-full/js/output/svg.js").SVG;
-
-const liteAdaptor =
-    require("mathjax-full/js/adaptors/liteAdaptor.js").liteAdaptor;
-
-const RegisterHTMLHandler =
-    require("mathjax-full/js/handlers/html.js").RegisterHTMLHandler;
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -29,7 +13,9 @@ const PORT = process.env.PORT || 3000;
 // MIDDLEWARE
 // =====================================================
 
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({
+    limit: "15mb"
+}));
 
 app.use(express.urlencoded({
     extended: true,
@@ -110,6 +96,13 @@ let keyIndex = 0;
 
 const getKey = () => {
 
+    if (!API_KEYS.length) {
+
+        throw new Error(
+            "No Gemini API Keys Found"
+        );
+    }
+
     const key = API_KEYS[keyIndex];
 
     keyIndex =
@@ -133,7 +126,7 @@ async function callGemini(
 
         try {
 
-            const res =
+            const response =
                 await axios.post(
 
                     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getKey()}`,
@@ -152,17 +145,25 @@ async function callGemini(
                     },
 
                     {
-                        timeout: 60000
+                        timeout: 60000,
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        }
                     }
                 );
 
             const text =
-                res.data
+                response.data
                     ?.candidates?.[0]
                     ?.content?.parts?.[0]
                     ?.text;
 
-            if (text) {
+            if (
+                text &&
+                typeof text === "string"
+            ) {
 
                 return text.trim();
             }
@@ -170,13 +171,23 @@ async function callGemini(
         } catch (err) {
 
             lastError = err;
+
+            console.log(
+                "Gemini Error:",
+                err.response?.data ||
+                err.message
+            );
         }
     }
 
     throw new Error(
 
+        lastError?.response?.data
+            ?.error?.message ||
+
         lastError?.message ||
-        "Gemini failed"
+
+        "Gemini request failed"
     );
 }
 
@@ -194,6 +205,8 @@ Convert user prompts into ultra-detailed cinematic prompts.
 RULES:
 - Expand lighting, environment, camera details
 - Make it realistic and cinematic
+- Add depth and realism
+- Keep original meaning
 - Output ONLY improved prompt
 
 USER:
@@ -223,7 +236,7 @@ async function generateImage(prompt) {
     const improvedPrompt =
         await enhancePrompt(prompt);
 
-    const res =
+    const response =
         await axios.post(
 
             "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
@@ -241,15 +254,16 @@ async function generateImage(prompt) {
                 responseType:
                     "arraybuffer",
 
-                timeout: 60000
+                timeout: 120000
             }
         );
 
-    const file = "./image.png";
+    const file =
+        `./image-${Date.now()}.png`;
 
     fs.writeFileSync(
         file,
-        res.data
+        response.data
     );
 
     return {
@@ -259,53 +273,29 @@ async function generateImage(prompt) {
 }
 
 // =====================================================
-// 🧮 MODERN MATHJAX CORE
+// 🧮 MATH DETECTOR
 // =====================================================
 
-const adaptor =
-    liteAdaptor();
+function isMath(text = "") {
 
-RegisterHTMLHandler(adaptor);
-
-const tex =
-    new TeX({
-        packages: ["base"]
-    });
-
-const svg =
-    new SVG({
-        fontCache: "local"
-    });
-
-const html =
-    MathJax.document(
-        "",
-        {
-            InputJax: tex,
-            OutputJax: svg
-        }
-    );
-
-// =====================================================
-// 🧮 MATH CORE
-// =====================================================
-
-function isMath(text) {
-
-    return /solve|calculate|equation|prove|x|y|=|\^|√|integrate|differentiate|fraction|matrix/i
+    return /solve|calculate|equation|prove|x|y|=|\^|√|integrate|differentiate|fraction|matrix|simplify|math/i
         .test(text.toLowerCase());
 }
+
+// =====================================================
+// 🧮 MATH SOLVER
+// =====================================================
 
 async function solveMath(question) {
 
     const prompt = `
-You are a WAEC/JAMB math solver.
+You are a WAEC/JAMB mathematics expert.
 
 RULES:
-- Step-by-step reasoning
-- Clear explanations
-- Use proper mathematics
-- Avoid raw LaTeX syntax in final explanation
+- Solve step-by-step
+- Be beginner friendly
+- Explain clearly
+- NO LATEX
 - Use Unicode symbols:
 √ π ± ² ³
 
@@ -325,61 +315,96 @@ ${question}
 }
 
 // =====================================================
-// 🖼️ LATEX → IMAGE RENDERER
+// 🖼️ MATH IMAGE GENERATOR
 // =====================================================
 
 async function mathToImage(text) {
 
-    try {
+    const svg = `
+    <svg width="1200" height="800"
+        xmlns="http://www.w3.org/2000/svg">
 
-        const node =
-            html.convert(
-                text,
-                {
-                    display: true
-                }
-            );
+        <style>
+            .title {
+                fill: white;
+                font-size: 38px;
+                font-family: Arial;
+                font-weight: bold;
+            }
 
-        const svgOutput =
-            adaptor.outerHTML(node);
+            .content {
+                fill: white;
+                font-size: 26px;
+                font-family: Arial;
+                white-space: pre-wrap;
+            }
+        </style>
 
-        const file =
-            "./math.png";
+        <rect
+            width="100%"
+            height="100%"
+            fill="#111827"
+        />
 
-        await sharp(
-            Buffer.from(svgOutput)
-        )
-            .png()
-            .toFile(file);
+        <text
+            x="50"
+            y="70"
+            class="title">
+            JARVIS Math Solution
+        </text>
 
-        return file;
+        <foreignObject
+            x="50"
+            y="110"
+            width="1100"
+            height="650">
 
-    } catch (err) {
+            <div xmlns="http://www.w3.org/1999/xhtml"
+                style="
+                    color:white;
+                    font-size:26px;
+                    line-height:1.7;
+                    font-family:Arial;
+                    white-space:pre-wrap;
+                ">
 
-        console.log(
-            "Math render error:",
-            err.message
-        );
+                ${text}
 
-        return null;
-    }
+            </div>
+
+        </foreignObject>
+
+    </svg>
+    `;
+
+    const file =
+        `./math-${Date.now()}.png`;
+
+    await sharp(
+        Buffer.from(svg)
+    )
+        .png()
+        .toFile(file);
+
+    return file;
 }
 
 // =====================================================
-// 📚 EXAM CORE
+// 📚 EXAM SOLVER
 // =====================================================
 
 async function examSolver(question) {
 
     const prompt = `
-WAEC/JAMB examiner mode.
+You are a WAEC/JAMB/Post-UTME examiner.
 
 RULES:
-- Step-by-step solution
-- Educational explanations
-- No skipped steps
-- No raw LaTeX
+- Solve step-by-step
+- Educational explanation
 - Beginner friendly
+- No skipped steps
+- NO LATEX
+- Use Unicode symbols only
 
 QUESTION:
 ${question}
@@ -395,6 +420,92 @@ ${question}
         }
     ]);
 }
+
+// =====================================================
+// 📄 PDF ANALYZER
+// =====================================================
+
+app.post("/pdf", async (req, res) => {
+
+    try {
+
+        const {
+            fileBase64,
+            prompt
+        } = req.body;
+
+        if (!fileBase64) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                error:
+                    "No PDF provided"
+            });
+        }
+
+        const buffer =
+            Buffer.from(
+
+                fileBase64.replace(
+                    /^data:application\/pdf;base64,/,
+                    ""
+                ),
+
+                "base64"
+            );
+
+        const pdfData =
+            await pdfParse(buffer);
+
+        const text =
+            pdfData.text || "";
+
+        const result =
+            await callGemini([
+
+                {
+                    parts: [
+                        {
+                            text:
+`Analyze this PDF document:
+
+${text}
+
+User Request:
+${prompt || "Summarize"}`
+                        }
+                    ]
+                }
+            ]);
+
+        return res.json({
+
+            success: true,
+
+            result,
+
+            time:
+                TimeCore.now()
+        });
+
+    } catch (err) {
+
+        console.log(
+            "PDF Error:",
+            err.message
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                err.message
+        });
+    }
+});
 
 // =====================================================
 // ⚙️ MAIN AI ROUTER
@@ -499,7 +610,13 @@ app.post("/ai", async (req, res) => {
                             text:
 `You are JARVIS AI.
 
-Be intelligent, educational and helpful.
+Be intelligent, educational,
+helpful and conversational.
+
+NO LATEX.
+
+Use Unicode symbols:
+√ π ± ² ³
 
 User:
 ${prompt}`
@@ -526,87 +643,6 @@ ${prompt}`
             "AI Route Error:",
             err.message
         );
-
-        return res.status(500).json({
-
-            success: false,
-
-            error:
-                err.message
-        });
-    }
-});
-
-// =====================================================
-// 📄 PDF ROUTE
-// =====================================================
-
-app.post("/pdf", async (req, res) => {
-
-    try {
-
-        const {
-            fileBase64,
-            prompt
-        } = req.body;
-
-        if (!fileBase64) {
-
-            return res.status(400).json({
-
-                success: false,
-
-                error:
-                    "No PDF provided"
-            });
-        }
-
-        const buffer =
-            Buffer.from(
-
-                fileBase64.replace(
-                    /^data:application\/pdf;base64,/,
-                    ""
-                ),
-
-                "base64"
-            );
-
-        const pdfData =
-            await pdfParse(buffer);
-
-        const text =
-            pdfData.text || "";
-
-        const result =
-            await callGemini([
-
-                {
-                    parts: [
-                        {
-                            text:
-`Analyze this PDF document:
-
-${text}
-
-User request:
-${prompt || "Summarize"}`
-                        }
-                    ]
-                }
-            ]);
-
-        return res.json({
-
-            success: true,
-
-            result,
-
-            time:
-                TimeCore.now()
-        });
-
-    } catch (err) {
 
         return res.status(500).json({
 
@@ -657,39 +693,49 @@ let quizLock = false;
 
 setInterval(async () => {
 
-    const {
-        hour,
-        minute
-    } = TimeCore.clock();
+    try {
 
-    if (
-        hour === "19" &&
-        minute === "00"
-    ) {
+        const {
+            hour,
+            minute
+        } = TimeCore.clock();
 
-        if (!quizLock) {
+        if (
+            hour === "19" &&
+            minute === "00"
+        ) {
 
-            quizLock = true;
+            if (!quizLock) {
 
-            console.log(
-                "⏰ WAT QUIZ RUNNING..."
-            );
+                quizLock = true;
 
-            await callGemini([
-                {
-                    parts: [
-                        {
-                            text:
+                console.log(
+                    "⏰ WAT QUIZ RUNNING..."
+                );
+
+                await callGemini([
+                    {
+                        parts: [
+                            {
+                                text:
 "Generate a daily WAEC/Post-UTME quiz"
-                        }
-                    ]
-                }
-            ]);
+                            }
+                        ]
+                    }
+                ]);
+            }
+
+        } else {
+
+            quizLock = false;
         }
 
-    } else {
+    } catch (err) {
 
-        quizLock = false;
+        console.log(
+            "Scheduler Error:",
+            err.message
+        );
     }
 
 }, 60000);
