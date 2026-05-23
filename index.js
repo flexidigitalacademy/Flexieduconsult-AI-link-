@@ -3,7 +3,6 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const pdfParse = require("pdf-parse");
-const { createCanvas } = require("canvas");
 const sharp = require("sharp");
 const fs = require("fs");
 const mjAPI = require("mathjax-node");
@@ -107,7 +106,7 @@ async function callGemini(contents, isJson = false) {
 }
 
 // =====================================================
-// 🧠 AUTO PROMPT ENHANCER (NEW)
+// 🧠 AUTO PROMPT ENHANCER
 // =====================================================
 
 async function enhancePrompt(prompt) {
@@ -115,16 +114,14 @@ async function enhancePrompt(prompt) {
     const system = `
 You are a professional AI image prompt engineer.
 
-Convert user prompts into ultra-detailed cinematic prompts for FLUX AI.
+Convert user prompts into ultra-detailed cinematic prompts.
 
 RULES:
-- Expand details (lighting, environment, camera)
-- Make it realistic and vivid
-- Add cinematic quality
-- Keep meaning unchanged
+- Expand lighting, environment, camera details
+- Make it realistic and cinematic
 - Output ONLY improved prompt
 
-USER PROMPT:
+USER:
 ${prompt}
 `;
 
@@ -136,7 +133,7 @@ ${prompt}
 }
 
 // =====================================================
-// 🎨 IMAGE CORE (FLUX + ENHANCER)
+// 🎨 IMAGE CORE (FLUX)
 // =====================================================
 
 async function generateImage(prompt) {
@@ -158,20 +155,12 @@ async function generateImage(prompt) {
     const file = "./image.png";
     fs.writeFileSync(file, res.data);
 
-    return {
-        file,
-        prompt: improvedPrompt
-    };
+    return { file, prompt: improvedPrompt };
 }
 
 // =====================================================
-// 🧮 MATH CORE
+// 🧮 MATH CORE (CANVAS REMOVED → SVG SAFE)
 // =====================================================
-
-mjAPI.config({
-    MathJax: { tex: { inlineMath: [["$", "$"]] } }
-});
-mjAPI.start();
 
 function isMath(text) {
     return /solve|calculate|equation|prove|x|y|=|\^|√/.test(text.toLowerCase());
@@ -193,27 +182,25 @@ ${question}
     return await callGemini([{ parts: [{ text: prompt }] }]);
 }
 
+// 🔥 REPLACED CANVAS WITH SVG + SHARP
 async function mathToImage(text) {
 
-    const canvas = createCanvas(1000, 600);
-    const ctx = canvas.getContext("2d");
+    const svg = `
+    <svg width="1000" height="600">
+        <rect width="100%" height="100%" fill="#111827"/>
+        <foreignObject x="40" y="40" width="920" height="520">
+            <div xmlns="http://www.w3.org/1999/xhtml"
+                style="color:white;font-size:24px;line-height:1.6;white-space:pre-wrap;font-family:Arial;">
+                ${text}
+            </div>
+        </foreignObject>
+    </svg>
+    `;
 
-    ctx.fillStyle = "#111827";
-    ctx.fillRect(0, 0, 1000, 600);
-
-    ctx.fillStyle = "#fff";
-    ctx.font = "28px Arial";
-
-    let y = 100;
-
-    text.split("\n").forEach(line => {
-        ctx.fillText(line, 50, y);
-        y += 50;
-    });
-
-    const buffer = canvas.toBuffer("image/png");
+    const buffer = Buffer.from(svg);
 
     const file = "./math.png";
+
     await sharp(buffer).png().toFile(file);
 
     return file;
@@ -248,9 +235,6 @@ app.post("/ai", async (req, res) => {
 
         const { prompt, mode } = req.body;
 
-        // =========================
-        // EXAM MODE
-        // =========================
         if (mode === "exam") {
 
             const result = await examSolver(prompt);
@@ -263,9 +247,6 @@ app.post("/ai", async (req, res) => {
             });
         }
 
-        // =========================
-        // IMAGE MODE
-        // =========================
         if (mode === "image") {
 
             const img = await generateImage(prompt);
@@ -279,9 +260,6 @@ app.post("/ai", async (req, res) => {
             });
         }
 
-        // =========================
-        // MATH MODE AUTO
-        // =========================
         if (isMath(prompt)) {
 
             const solution = await solveMath(prompt);
@@ -295,10 +273,6 @@ app.post("/ai", async (req, res) => {
                 time: TimeCore.now()
             });
         }
-
-        // =========================
-        // NORMAL AI MODE
-        // =========================
 
         const result = await callGemini([
             { parts: [{ text: `You are JARVIS AI.\nUser: ${prompt}` }] }
@@ -321,7 +295,7 @@ app.post("/ai", async (req, res) => {
 });
 
 // =====================================================
-// 🧠 SYSTEM ROUTES
+// SYSTEM ROUTES
 // =====================================================
 
 app.get("/", (req, res) => {
@@ -336,7 +310,7 @@ app.get("/test", (req, res) => {
 });
 
 // =====================================================
-// ⏰ WAT SCHEDULER
+// WAT SCHEDULER
 // =====================================================
 
 let quizLock = false;
@@ -364,7 +338,7 @@ setInterval(async () => {
 }, 60000);
 
 // =====================================================
-// 🚀 START SERVER
+// START SERVER
 // =====================================================
 
 app.listen(PORT, () => {
