@@ -5,7 +5,22 @@ const axios = require("axios");
 const pdfParse = require("pdf-parse");
 const sharp = require("sharp");
 const fs = require("fs");
-const mjAPI = require("mathjax-node");
+
+// ✅ MODERN MATHJAX
+const MathJax =
+    require("mathjax-full/js/mathjax.js").mathjax;
+
+const TeX =
+    require("mathjax-full/js/input/tex.js").TeX;
+
+const SVG =
+    require("mathjax-full/js/output/svg.js").SVG;
+
+const liteAdaptor =
+    require("mathjax-full/js/adaptors/liteAdaptor.js").liteAdaptor;
+
+const RegisterHTMLHandler =
+    require("mathjax-full/js/handlers/html.js").RegisterHTMLHandler;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,7 +30,11 @@ const PORT = process.env.PORT || 3000;
 // =====================================================
 
 app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+
+app.use(express.urlencoded({
+    extended: true,
+    limit: "15mb"
+}));
 
 // =====================================================
 // 🇳🇬 WAT TIME CORE
@@ -24,30 +43,52 @@ app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 const TimeCore = {
 
     now() {
-        return new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Africa/Lagos",
-            day: "2-digit",
-            month: "long",
-            year: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true
-        }).format(new Date());
+
+        return new Intl.DateTimeFormat(
+            "en-GB",
+            {
+                timeZone: "Africa/Lagos",
+
+                day: "2-digit",
+                month: "long",
+                year: "numeric",
+
+                hour: "2-digit",
+                minute: "2-digit",
+
+                hour12: true
+            }
+        ).format(new Date());
     },
 
     clock() {
-        const hour = new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Africa/Lagos",
-            hour: "2-digit",
-            hour12: false
-        }).format(new Date());
 
-        const minute = new Intl.DateTimeFormat("en-GB", {
-            timeZone: "Africa/Lagos",
-            minute: "2-digit"
-        }).format(new Date());
+        const hour =
+            new Intl.DateTimeFormat(
+                "en-GB",
+                {
+                    timeZone: "Africa/Lagos",
 
-        return { hour, minute };
+                    hour: "2-digit",
+
+                    hour12: false
+                }
+            ).format(new Date());
+
+        const minute =
+            new Intl.DateTimeFormat(
+                "en-GB",
+                {
+                    timeZone: "Africa/Lagos",
+
+                    minute: "2-digit"
+                }
+            ).format(new Date());
+
+        return {
+            hour,
+            minute
+        };
     }
 };
 
@@ -56,53 +97,87 @@ const TimeCore = {
 // =====================================================
 
 const API_KEYS = [
+
     process.env.GEMINI_API_KEY_1,
     process.env.GEMINI_API_KEY_2,
     process.env.GEMINI_API_KEY_3,
     process.env.GEMINI_API_KEY_4,
     process.env.GEMINI_API_KEY_5
+
 ].filter(Boolean);
 
 let keyIndex = 0;
 
 const getKey = () => {
+
     const key = API_KEYS[keyIndex];
-    keyIndex = (keyIndex + 1) % API_KEYS.length;
+
+    keyIndex =
+        (keyIndex + 1) % API_KEYS.length;
+
     return key;
 };
 
-async function callGemini(contents, isJson = false) {
+async function callGemini(
+    contents,
+    isJson = false
+) {
 
     let lastError;
 
-    for (let i = 0; i < API_KEYS.length; i++) {
+    for (
+        let i = 0;
+        i < API_KEYS.length;
+        i++
+    ) {
 
         try {
 
-            const res = await axios.post(
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getKey()}`,
-                {
-                    contents,
-                    ...(isJson && {
-                        generationConfig: {
-                            responseMimeType: "application/json"
-                        }
-                    })
-                },
-                { timeout: 60000 }
-            );
+            const res =
+                await axios.post(
+
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getKey()}`,
+
+                    {
+                        contents,
+
+                        ...(isJson && {
+
+                            generationConfig: {
+
+                                responseMimeType:
+                                    "application/json"
+                            }
+                        })
+                    },
+
+                    {
+                        timeout: 60000
+                    }
+                );
 
             const text =
-                res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                res.data
+                    ?.candidates?.[0]
+                    ?.content?.parts?.[0]
+                    ?.text;
 
-            if (text) return text.trim();
+            if (text) {
+
+                return text.trim();
+            }
 
         } catch (err) {
+
             lastError = err;
         }
     }
 
-    throw new Error(lastError?.message || "Gemini failed");
+    throw new Error(
+
+        lastError?.message ||
+        "Gemini failed"
+    );
 }
 
 // =====================================================
@@ -125,9 +200,16 @@ USER:
 ${prompt}
 `;
 
-    const enhanced = await callGemini([
-        { parts: [{ text: system }] }
-    ]);
+    const enhanced =
+        await callGemini([
+            {
+                parts: [
+                    {
+                        text: system
+                    }
+                ]
+            }
+        ]);
 
     return enhanced || prompt;
 }
@@ -138,32 +220,80 @@ ${prompt}
 
 async function generateImage(prompt) {
 
-    const improvedPrompt = await enhancePrompt(prompt);
+    const improvedPrompt =
+        await enhancePrompt(prompt);
 
-    const res = await axios.post(
-        "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
-        { inputs: improvedPrompt },
-        {
-            headers: {
-                Authorization: `Bearer ${process.env.HF_TOKEN}`
+    const res =
+        await axios.post(
+
+            "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+
+            {
+                inputs: improvedPrompt
             },
-            responseType: "arraybuffer",
-            timeout: 60000
-        }
-    );
+
+            {
+                headers: {
+                    Authorization:
+`Bearer ${process.env.HF_TOKEN}`
+                },
+
+                responseType:
+                    "arraybuffer",
+
+                timeout: 60000
+            }
+        );
 
     const file = "./image.png";
-    fs.writeFileSync(file, res.data);
 
-    return { file, prompt: improvedPrompt };
+    fs.writeFileSync(
+        file,
+        res.data
+    );
+
+    return {
+        file,
+        prompt: improvedPrompt
+    };
 }
 
 // =====================================================
-// 🧮 MATH CORE (CANVAS REMOVED → SVG SAFE)
+// 🧮 MODERN MATHJAX CORE
+// =====================================================
+
+const adaptor =
+    liteAdaptor();
+
+RegisterHTMLHandler(adaptor);
+
+const tex =
+    new TeX({
+        packages: ["base"]
+    });
+
+const svg =
+    new SVG({
+        fontCache: "local"
+    });
+
+const html =
+    MathJax.document(
+        "",
+        {
+            InputJax: tex,
+            OutputJax: svg
+        }
+    );
+
+// =====================================================
+// 🧮 MATH CORE
 // =====================================================
 
 function isMath(text) {
-    return /solve|calculate|equation|prove|x|y|=|\^|√/.test(text.toLowerCase());
+
+    return /solve|calculate|equation|prove|x|y|=|\^|√|integrate|differentiate|fraction|matrix/i
+        .test(text.toLowerCase());
 }
 
 async function solveMath(question) {
@@ -171,39 +301,68 @@ async function solveMath(question) {
     const prompt = `
 You are a WAEC/JAMB math solver.
 
-- Step-by-step solution
-- No LaTeX
-- Use √ π ± ² ³
+RULES:
+- Step-by-step reasoning
+- Clear explanations
+- Use proper mathematics
+- Avoid raw LaTeX syntax in final explanation
+- Use Unicode symbols:
+√ π ± ² ³
 
 QUESTION:
 ${question}
 `;
 
-    return await callGemini([{ parts: [{ text: prompt }] }]);
+    return await callGemini([
+        {
+            parts: [
+                {
+                    text: prompt
+                }
+            ]
+        }
+    ]);
 }
 
-// 🔥 REPLACED CANVAS WITH SVG + SHARP
+// =====================================================
+// 🖼️ LATEX → IMAGE RENDERER
+// =====================================================
+
 async function mathToImage(text) {
 
-    const svg = `
-    <svg width="1000" height="600">
-        <rect width="100%" height="100%" fill="#111827"/>
-        <foreignObject x="40" y="40" width="920" height="520">
-            <div xmlns="http://www.w3.org/1999/xhtml"
-                style="color:white;font-size:24px;line-height:1.6;white-space:pre-wrap;font-family:Arial;">
-                ${text}
-            </div>
-        </foreignObject>
-    </svg>
-    `;
+    try {
 
-    const buffer = Buffer.from(svg);
+        const node =
+            html.convert(
+                text,
+                {
+                    display: true
+                }
+            );
 
-    const file = "./math.png";
+        const svgOutput =
+            adaptor.outerHTML(node);
 
-    await sharp(buffer).png().toFile(file);
+        const file =
+            "./math.png";
 
-    return file;
+        await sharp(
+            Buffer.from(svgOutput)
+        )
+            .png()
+            .toFile(file);
+
+        return file;
+
+    } catch (err) {
+
+        console.log(
+            "Math render error:",
+            err.message
+        );
+
+        return null;
+    }
 }
 
 // =====================================================
@@ -213,16 +372,28 @@ async function mathToImage(text) {
 async function examSolver(question) {
 
     const prompt = `
-WAEC/JAMB examiner mode:
+WAEC/JAMB examiner mode.
 
-Step-by-step solution only.
-No LaTeX.
+RULES:
+- Step-by-step solution
+- Educational explanations
+- No skipped steps
+- No raw LaTeX
+- Beginner friendly
 
 QUESTION:
 ${question}
 `;
 
-    return await callGemini([{ parts: [{ text: prompt }] }]);
+    return await callGemini([
+        {
+            parts: [
+                {
+                    text: prompt
+                }
+            ]
+        }
+    ]);
 }
 
 // =====================================================
@@ -233,114 +404,303 @@ app.post("/ai", async (req, res) => {
 
     try {
 
-        const { prompt, mode } = req.body;
+        const {
+            prompt,
+            mode
+        } = req.body;
+
+        // =================================================
+        // EXAM MODE
+        // =================================================
 
         if (mode === "exam") {
 
-            const result = await examSolver(prompt);
+            const result =
+                await examSolver(prompt);
 
             return res.json({
+
                 success: true,
+
                 type: "exam",
+
                 text: result,
-                time: TimeCore.now()
+
+                time:
+                    TimeCore.now()
             });
         }
+
+        // =================================================
+        // IMAGE MODE
+        // =================================================
 
         if (mode === "image") {
 
-            const img = await generateImage(prompt);
+            const img =
+                await generateImage(prompt);
 
             return res.json({
+
                 success: true,
+
                 type: "image",
-                image: img.file,
-                enhanced_prompt: img.prompt,
-                time: TimeCore.now()
+
+                image:
+                    img.file,
+
+                enhanced_prompt:
+                    img.prompt,
+
+                time:
+                    TimeCore.now()
             });
         }
+
+        // =================================================
+        // AUTO MATH MODE
+        // =================================================
 
         if (isMath(prompt)) {
 
-            const solution = await solveMath(prompt);
-            const image = await mathToImage(solution);
+            const solution =
+                await solveMath(prompt);
+
+            const image =
+                await mathToImage(solution);
 
             return res.json({
+
                 success: true,
-                type: "math-combo",
-                text: solution,
+
+                type:
+                    "math-combo",
+
+                text:
+                    solution,
+
                 image,
-                time: TimeCore.now()
+
+                time:
+                    TimeCore.now()
             });
         }
 
-        const result = await callGemini([
-            { parts: [{ text: `You are JARVIS AI.\nUser: ${prompt}` }] }
-        ]);
+        // =================================================
+        // NORMAL AI MODE
+        // =================================================
+
+        const result =
+            await callGemini([
+
+                {
+                    parts: [
+                        {
+                            text:
+`You are JARVIS AI.
+
+Be intelligent, educational and helpful.
+
+User:
+${prompt}`
+                        }
+                    ]
+                }
+            ]);
 
         return res.json({
+
             success: true,
+
             type: "text",
+
             text: result,
-            time: TimeCore.now()
+
+            time:
+                TimeCore.now()
         });
 
     } catch (err) {
 
+        console.log(
+            "AI Route Error:",
+            err.message
+        );
+
         return res.status(500).json({
+
             success: false,
-            error: err.message
+
+            error:
+                err.message
         });
     }
 });
 
 // =====================================================
-// SYSTEM ROUTES
+// 📄 PDF ROUTE
+// =====================================================
+
+app.post("/pdf", async (req, res) => {
+
+    try {
+
+        const {
+            fileBase64,
+            prompt
+        } = req.body;
+
+        if (!fileBase64) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                error:
+                    "No PDF provided"
+            });
+        }
+
+        const buffer =
+            Buffer.from(
+
+                fileBase64.replace(
+                    /^data:application\/pdf;base64,/,
+                    ""
+                ),
+
+                "base64"
+            );
+
+        const pdfData =
+            await pdfParse(buffer);
+
+        const text =
+            pdfData.text || "";
+
+        const result =
+            await callGemini([
+
+                {
+                    parts: [
+                        {
+                            text:
+`Analyze this PDF document:
+
+${text}
+
+User request:
+${prompt || "Summarize"}`
+                        }
+                    ]
+                }
+            ]);
+
+        return res.json({
+
+            success: true,
+
+            result,
+
+            time:
+                TimeCore.now()
+        });
+
+    } catch (err) {
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                err.message
+        });
+    }
+});
+
+// =====================================================
+// 🏠 SYSTEM ROUTES
 // =====================================================
 
 app.get("/", (req, res) => {
+
     res.send(`
-        <h1>JARVIS AI CORE (FULL PRODUCTION)</h1>
-        <p>WAT TIME: ${TimeCore.now()}</p>
+
+        <h1>
+            🤖 JARVIS AI CORE
+        </h1>
+
+        <p>
+            STATUS: ONLINE
+        </p>
+
+        <p>
+            WAT TIME:
+            ${TimeCore.now()}
+        </p>
+
     `);
 });
 
 app.get("/test", (req, res) => {
-    res.json({ ok: true });
+
+    res.json({
+        ok: true
+    });
 });
 
 // =====================================================
-// WAT SCHEDULER
+// ⏰ WAT SCHEDULER
 // =====================================================
 
 let quizLock = false;
 
 setInterval(async () => {
 
-    const { hour, minute } = TimeCore.clock();
+    const {
+        hour,
+        minute
+    } = TimeCore.clock();
 
-    if (hour === "19" && minute === "00") {
+    if (
+        hour === "19" &&
+        minute === "00"
+    ) {
 
         if (!quizLock) {
+
             quizLock = true;
 
-            console.log("⏰ WAT QUIZ RUNNING...");
+            console.log(
+                "⏰ WAT QUIZ RUNNING..."
+            );
 
             await callGemini([
-                { parts: [{ text: "Generate a daily quiz" }] }
+                {
+                    parts: [
+                        {
+                            text:
+"Generate a daily WAEC/Post-UTME quiz"
+                        }
+                    ]
+                }
             ]);
         }
 
     } else {
+
         quizLock = false;
     }
 
 }, 60000);
 
 // =====================================================
-// START SERVER
+// 🚀 START SERVER
 // =====================================================
 
 app.listen(PORT, () => {
-    console.log(`JARVIS CORE RUNNING ON PORT ${PORT}`);
+
+    console.log(
+`🚀 JARVIS CORE RUNNING ON PORT ${PORT}`
+    );
 });
