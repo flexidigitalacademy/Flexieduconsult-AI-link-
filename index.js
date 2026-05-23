@@ -3,9 +3,6 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const pdfParse = require("pdf-parse");
-const sharp = require("sharp");
-const fs = require("fs");
-const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,72 +11,15 @@ const PORT = process.env.PORT || 3000;
 // MIDDLEWARE
 // =====================================================
 
-app.use(express.json({
-    limit: "20mb"
-}));
+app.use(express.json({ limit: "15mb" }));
 
 app.use(express.urlencoded({
     extended: true,
-    limit: "20mb"
+    limit: "15mb"
 }));
 
 // =====================================================
-// 🇳🇬 WAT TIME CORE
-// =====================================================
-
-const TimeCore = {
-
-    now() {
-
-        return new Intl.DateTimeFormat(
-            "en-GB",
-            {
-                timeZone: "Africa/Lagos",
-
-                day: "2-digit",
-                month: "long",
-                year: "numeric",
-
-                hour: "2-digit",
-                minute: "2-digit",
-
-                second: "2-digit",
-
-                hour12: true
-            }
-        ).format(new Date());
-    },
-
-    clock() {
-
-        const hour =
-            new Intl.DateTimeFormat(
-                "en-GB",
-                {
-                    timeZone: "Africa/Lagos",
-                    hour: "2-digit",
-                    hour12: false
-                }
-            ).format(new Date());
-
-        const minute =
-            new Intl.DateTimeFormat(
-                "en-GB",
-                {
-                    timeZone: "Africa/Lagos",
-                    minute: "2-digit"
-                }
-            ).format(new Date());
-
-        return {
-            hour,
-            minute
-        };
-    }
-};
-
-// =====================================================
-// 🧠 GEMINI CORE
+// GEMINI API KEYS
 // =====================================================
 
 const API_KEYS = [
@@ -94,12 +34,16 @@ const API_KEYS = [
 
 let keyIndex = 0;
 
-function getKey() {
+// =====================================================
+// API KEY ROTATOR
+// =====================================================
+
+const getNextKey = () => {
 
     if (!API_KEYS.length) {
 
         throw new Error(
-            "❌ No Gemini API Keys Found"
+            "No Gemini API Keys Found"
         );
     }
 
@@ -109,7 +53,11 @@ function getKey() {
         (keyIndex + 1) % API_KEYS.length;
 
     return key;
-}
+};
+
+// =====================================================
+// GEMINI REQUEST ENGINE (UPDATED/FIXED)
+// =====================================================
 
 async function callGemini(
     contents,
@@ -118,34 +66,43 @@ async function callGemini(
 
     let lastError;
 
-    for (
-        let i = 0;
-        i < API_KEYS.length;
-        i++
-    ) {
+    for (let i = 0; i < API_KEYS.length; i++) {
+
+        const key = getNextKey();
 
         try {
+
+            const payload = {
+                contents
+            };
+
+            // =================================================
+            // FORCE JSON OUTPUT
+            // =================================================
+
+            if (isJson) {
+
+                payload.generationConfig = {
+
+                    responseMimeType:
+                        "application/json"
+                };
+            }
+
+            // =================================================
+            // GEMINI REQUEST
+            // =================================================
 
             const response =
                 await axios.post(
 
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${getKey()}`,
+                    // ✅ FIXED MODEL
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+
+                    payload,
 
                     {
-                        contents,
-
-                        ...(isJson && {
-
-                            generationConfig: {
-
-                                responseMimeType:
-                                    "application/json"
-                            }
-                        })
-                    },
-
-                    {
-                        timeout: 60000,
+                        timeout: 45000,
 
                         headers: {
                             "Content-Type":
@@ -153,6 +110,10 @@ async function callGemini(
                         }
                     }
                 );
+
+            // =================================================
+            // SAFE EXTRACTION
+            // =================================================
 
             const text =
                 response.data
@@ -168,12 +129,17 @@ async function callGemini(
                 return text.trim();
             }
 
+            console.log(
+                "⚠️ Gemini returned empty response"
+            );
+
         } catch (err) {
 
             lastError = err;
 
+            // ✅ DETAILED LOGGING
             console.log(
-                "❌ Gemini Error:",
+                `⚠️ Gemini key ${i + 1} failed:`,
                 err.response?.data ||
                 err.message
             );
@@ -182,8 +148,7 @@ async function callGemini(
 
     throw new Error(
 
-        lastError?.response?.data
-            ?.error?.message ||
+        lastError?.response?.data?.error?.message ||
 
         lastError?.message ||
 
@@ -192,351 +157,499 @@ async function callGemini(
 }
 
 // =====================================================
-// 🧠 AUTO PROMPT ENHANCER
+// OCR SPACE
 // =====================================================
 
-async function enhancePrompt(prompt) {
+async function ocrSpace(fileBase64) {
 
-    const system = `
-You are a professional AI image prompt engineer.
+    try {
 
-Convert user prompts into ultra-detailed cinematic prompts.
+        const clean =
+            fileBase64.replace(
+                /^data:.*?;base64,/,
+                ""
+            );
 
-RULES:
-- Expand lighting
-- Expand environment
-- Expand realism
-- Add camera details
-- Add cinematic depth
-- Keep original meaning
-- Output ONLY improved prompt
+        const formData =
+            new URLSearchParams();
 
-USER:
-${prompt}
-`;
-
-    const enhanced =
-        await callGemini([
-            {
-                parts: [
-                    {
-                        text: system
-                    }
-                ]
-            }
-        ]);
-
-    return enhanced || prompt;
-}
-
-// =====================================================
-// 🎨 IMAGE GENERATION CORE
-// =====================================================
-
-async function generateImage(prompt) {
-
-    const improvedPrompt =
-        await enhancePrompt(prompt);
-
-    const response =
-        await axios.post(
-
-            "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
-
-            {
-                inputs: improvedPrompt
-            },
-
-            {
-                headers: {
-                    Authorization:
-`Bearer ${process.env.HF_TOKEN}`
-                },
-
-                responseType:
-                    "arraybuffer",
-
-                timeout: 120000
-            }
+        formData.append(
+            "base64Image",
+            clean
         );
 
-    const filename =
-        `image-${Date.now()}.png`;
+        formData.append(
+            "language",
+            "eng"
+        );
 
-    const filepath =
-        path.join(__dirname, filename);
+        formData.append(
+            "OCREngine",
+            "2"
+        );
 
-    fs.writeFileSync(
-        filepath,
-        response.data
-    );
+        const response =
+            await axios.post(
 
-    return {
-        filepath,
-        filename,
-        enhancedPrompt:
-            improvedPrompt
-    };
-}
+                "https://api.ocr.space/parse/image",
 
-// =====================================================
-// 🧮 MATH DETECTOR
-// =====================================================
+                formData,
 
-function isMath(text = "") {
-
-    return /solve|calculate|equation|prove|x|y|=|\^|√|integrate|differentiate|fraction|matrix|simplify|math/i
-        .test(text.toLowerCase());
-}
-
-// =====================================================
-// 🧮 MATH SOLVER
-// =====================================================
-
-async function solveMath(question) {
-
-    const prompt = `
-You are a WAEC/JAMB mathematics expert.
-
-RULES:
-- Solve step-by-step
-- Beginner friendly
-- Educational
-- NO LATEX
-- Use Unicode symbols:
-√ π ± ² ³
-
-QUESTION:
-${question}
-`;
-
-    return await callGemini([
-        {
-            parts: [
                 {
-                    text: prompt
+                    headers: {
+
+                        apikey:
+                            process.env.OCR_API_KEY,
+
+                        "Content-Type":
+                            "application/x-www-form-urlencoded"
+                    },
+
+                    timeout: 30000
                 }
-            ]
-        }
-    ]);
+            );
+
+        return response.data
+            ?.ParsedResults
+            ?.map(r => r.ParsedText)
+            .join("\n")
+            ?.trim() || "";
+
+    } catch {
+
+        return "";
+    }
 }
 
 // =====================================================
-// 🖼️ MATH IMAGE GENERATOR
+// NIGERIA TIME
 // =====================================================
 
-async function mathToImage(text) {
+const getNigeriaTime = () => {
 
-    const svg = `
-    <svg width="1200" height="800"
-        xmlns="http://www.w3.org/2000/svg">
-
-        <style>
-            .title {
-                fill: white;
-                font-size: 38px;
-                font-family: Arial;
-                font-weight: bold;
-            }
-
-            .content {
-                fill: white;
-                font-size: 26px;
-                font-family: Arial;
-                white-space: pre-wrap;
-            }
-        </style>
-
-        <rect
-            width="100%"
-            height="100%"
-            fill="#111827"
-        />
-
-        <text
-            x="50"
-            y="70"
-            class="title">
-            JARVIS Math Solution
-        </text>
-
-        <foreignObject
-            x="50"
-            y="110"
-            width="1100"
-            height="650">
-
-            <div xmlns="http://www.w3.org/1999/xhtml"
-                style="
-                    color:white;
-                    font-size:26px;
-                    line-height:1.7;
-                    font-family:Arial;
-                    white-space:pre-wrap;
-                ">
-
-                ${text}
-
-            </div>
-
-        </foreignObject>
-
-    </svg>
-    `;
-
-    const filename =
-        `math-${Date.now()}.png`;
-
-    const filepath =
-        path.join(__dirname, filename);
-
-    await sharp(
-        Buffer.from(svg)
-    )
-        .png()
-        .toFile(filepath);
-
-    return {
-        filepath,
-        filename
-    };
-}
-
-// =====================================================
-// 📚 EXAM SOLVER
-// =====================================================
-
-async function examSolver(question) {
-
-    const prompt = `
-You are a WAEC/JAMB/Post-UTME examiner.
-
-RULES:
-- Solve step-by-step
-- Educational explanation
-- Beginner friendly
-- No skipped steps
-- NO LATEX
-- Use Unicode symbols only
-
-QUESTION:
-${question}
-`;
-
-    return await callGemini([
+    return new Intl.DateTimeFormat(
+        "en-GB",
         {
-            parts: [
-                {
-                    text: prompt
-                }
-            ]
+            timeZone: "Africa/Lagos",
+
+            day: "2-digit",
+            month: "long",
+            year: "numeric",
+
+            hour: "2-digit",
+            minute: "2-digit",
+
+            hour12: true
         }
-    ]);
-}
+    ).format(new Date());
+};
 
 // =====================================================
-// 🧠 GENERAL AI CHAT
-// =====================================================
-
-async function normalAI(prompt) {
-
-    return await callGemini([
-
-        {
-            parts: [
-                {
-                    text:
-`You are JARVIS AI.
-
-Be intelligent,
-educational,
-helpful,
-friendly,
-and conversational.
-
-NO LATEX.
-
-Use Unicode symbols:
-√ π ± ² ³
-
-USER:
-${prompt}`
-                }
-            ]
-        }
-    ]);
-}
-
-// =====================================================
-// 🏠 ROOT ROUTE
+// HOME ROUTE
 // =====================================================
 
 app.get("/", (req, res) => {
 
     res.send(`
-
-        <h1>🤖 JARVIS AI CORE</h1>
-
-        <p>STATUS: ONLINE</p>
-
-        <p>TIME: ${TimeCore.now()}</p>
-
-        <hr>
-
-        <h3>AVAILABLE ROUTES</h3>
-
-        <ul>
-            <li>GET /</li>
-            <li>GET /test</li>
-            <li>GET /debug-ai</li>
-            <li>POST /ai</li>
-            <li>POST /pdf</li>
-        </ul>
-
+        <h1>🤖 JARVIS CORE</h1>
+        <p>ONLINE</p>
+        <p>${getNigeriaTime()}</p>
     `);
 });
 
 // =====================================================
-// 🧪 TEST ROUTE
+// TEST ROUTE
 // =====================================================
 
 app.get("/test", (req, res) => {
 
     res.json({
-
         success: true,
-
-        message:
-            "✅ JARVIS server working",
-
-        time:
-            TimeCore.now()
+        message: "AI Server Online"
     });
 });
 
 // =====================================================
-// 🧪 DEBUG ROUTE
+// DEBUG GEMINI ROUTE
 // =====================================================
 
-app.get("/debug-ai", (req, res) => {
+app.get("/debug-ai", async (req, res) => {
 
-    res.json({
+    try {
+
+        const result =
+            await callGemini([
+
+                {
+                    parts: [
+                        {
+                            text: "hello"
+                        }
+                    ]
+                }
+            ]);
+
+        res.send(`
+            <h2>✅ GEMINI WORKING</h2>
+            <pre>${result}</pre>
+        `);
+
+    } catch (err) {
+
+        res.send(`
+
+            <h2>❌ GEMINI ERROR</h2>
+
+            <pre>
+
+${JSON.stringify(
+
+    err.response?.data ||
+
+    err.message,
+
+    null,
+    2
+
+)}
+
+            </pre>
+        `);
+    }
+});
+
+// =====================================================
+// AI ROUTE
+// =====================================================
+
+app.post("/ai", async (req, res) => {
+
+    try {
+
+        const {
+            prompt,
+            image
+        } = req.body;
+
+        const parts = [
+
+            {
+                text:
+`You are JARVIS for Flexi Digital Academy.
+
+Be educational.
+NO LATEX.
+Use Unicode symbols like:
+√ π ± ² ³
+
+User:
+${prompt || "Analyze this"}`
+            }
+        ];
+
+        // =================================================
+        // IMAGE SUPPORT
+        // =================================================
+
+        if (image) {
+
+            parts.push({
+
+                inline_data: {
+
+                    mime_type: "image/jpeg",
+
+                    data:
+                        image.replace(
+                            /^data:.*?;base64,/,
+                            ""
+                        )
+                }
+            });
+        }
+
+        // =================================================
+        // GEMINI CALL
+        // =================================================
+
+        const result =
+            await callGemini([
+                { parts }
+            ]);
+
+        return res.json({
+
+            success: true,
+
+            result:
+                result || "No response"
+        });
+
+    } catch (err) {
+
+        console.log(
+            "❌ AI Route FULL Error:",
+            err.response?.data ||
+            err.message
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                err.message ||
+                "AI failed"
+        });
+    }
+});
+
+// =====================================================
+// SMART GRAMMAR ROUTE
+// =====================================================
+
+app.post("/grammar", async (req, res) => {
+
+    try {
+
+        const { text } = req.body;
+
+        if (
+            !text ||
+            text.trim().length < 2
+        ) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                error: "Text required"
+            });
+        }
+
+        // =================================================
+        // STAGE 1:
+        // SEVERITY DETECTION
+        // =================================================
+
+        const judgePrompt =
+`You are a smart Nigerian English and Pidgin detector.
+
+Your task:
+Determine whether a message truly needs grammar correction.
+
+IMPORTANT:
+Do NOT correct:
+- Nigerian Pidgin
+- Mixed Pidgin + English
+- WhatsApp slang
+- Internet slang
+- Casual abbreviations
+- Informal African English
+- Understandable street expressions
+
+Only correct:
+- Serious grammatical mistakes
+- Broken English that harms understanding
+- Severe spelling issues
+- Academic or formal sentence errors
+
+RETURN ONLY JSON.
+
+EITHER:
+
+{
+  "action": "IGNORE"
+}
+
+OR
+
+{
+  "action": "CORRECT"
+}
+
+USER:
+${text}`;
+
+        const judgeResult =
+            await callGemini(
+
+                [
+                    {
+                        parts: [
+                            {
+                                text: judgePrompt
+                            }
+                        ]
+                    }
+                ],
+
+                true
+            );
+
+        let judgeParsed;
+
+        try {
+
+            judgeParsed =
+                JSON.parse(judgeResult);
+
+        } catch {
+
+            return res.json({
+
+                success: true,
+
+                ignored: true
+            });
+        }
+
+        if (
+            judgeParsed.action === "IGNORE"
+        ) {
+
+            return res.json({
+
+                success: true,
+
+                ignored: true
+            });
+        }
+
+        // =================================================
+        // STAGE 2:
+        // FULL CORRECTION
+        // =================================================
+
+        const correctionPrompt =
+`You are an advanced grammar correction engine.
+
+Return ONLY JSON.
+
+{
+  "type": "grammar",
+  "reply": "Corrected sentence"
+}
+
+USER:
+${text}`;
+
+        const correctionResult =
+            await callGemini(
+
+                [
+                    {
+                        parts: [
+                            {
+                                text: correctionPrompt
+                            }
+                        ]
+                    }
+                ],
+
+                true
+            );
+
+        let parsed;
+
+        try {
+
+            parsed =
+                JSON.parse(correctionResult);
+
+        } catch {
+
+            console.log(
+                "❌ Invalid Correction JSON:",
+                correctionResult
+            );
+
+            return res.json({
+
+                success: true,
+
+                ignored: true
+            });
+        }
+
+        if (
+            !parsed.reply ||
+            parsed.reply
+                .trim()
+                .toLowerCase() ===
+            text
+                .trim()
+                .toLowerCase()
+        ) {
+
+            return res.json({
+
+                success: true,
+
+                ignored: true
+            });
+        }
+
+        return res.json({
+
+            success: true,
+
+            type:
+                parsed.type || "grammar",
+
+            reply:
+                parsed.reply
+        });
+
+    } catch (err) {
+
+        console.log(
+            "❌ Grammar Route Error:",
+            err.response?.data ||
+            err.message
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            error:
+                "Grammar engine failed"
+        });
+    }
+});
+
+// =====================================================
+// IMAGE ROUTE
+// =====================================================
+
+app.get("/image", (req, res) => {
+
+    const prompt =
+        req.query.prompt;
+
+    if (!prompt) {
+
+        return res.status(400).json({
+
+            success: false,
+
+            error:
+                "Prompt required"
+        });
+    }
+
+    return res.json({
 
         success: true,
 
-        status:
-            "✅ AI ROUTE ONLINE",
-
-        gemini_keys_loaded:
-            API_KEYS.length,
-
-        server_time:
-            TimeCore.now()
+        image:
+`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`
     });
 });
 
 // =====================================================
-// 📄 PDF ANALYZER
+// PDF ROUTE
 // =====================================================
 
 app.post("/pdf", async (req, res) => {
@@ -555,7 +668,7 @@ app.post("/pdf", async (req, res) => {
                 success: false,
 
                 error:
-                    "❌ No PDF provided"
+                    "No PDF provided"
             });
         }
 
@@ -570,11 +683,39 @@ app.post("/pdf", async (req, res) => {
                 "base64"
             );
 
-        const pdfData =
-            await pdfParse(buffer);
+        let text = "";
 
-        const extractedText =
-            pdfData.text || "";
+        try {
+
+            const pdfData =
+                await pdfParse(buffer);
+
+            text =
+                pdfData.text || "";
+
+        } catch {}
+
+        if (
+            text.trim().length < 50
+        ) {
+
+            text =
+                await ocrSpace(fileBase64);
+        }
+
+        if (
+            !text ||
+            text.trim().length < 5
+        ) {
+
+            return res.json({
+
+                success: false,
+
+                error:
+                    "Unreadable document"
+            });
+        }
 
         const result =
             await callGemini([
@@ -583,13 +724,12 @@ app.post("/pdf", async (req, res) => {
                     parts: [
                         {
                             text:
-`Analyze this PDF carefully.
+`Analyze this document:
 
-PDF CONTENT:
-${extractedText}
+${text}
 
-USER REQUEST:
-${prompt || "Summarize this PDF"}`
+User Request:
+${prompt || "Summarize"}`
                         }
                     ]
                 }
@@ -598,19 +738,13 @@ ${prompt || "Summarize this PDF"}`
         return res.json({
 
             success: true,
-
-            type: "pdf",
-
-            result,
-
-            time:
-                TimeCore.now()
+            result
         });
 
     } catch (err) {
 
         console.log(
-            "❌ PDF Error:",
+            "❌ PDF Route Error:",
             err.response?.data ||
             err.message
         );
@@ -620,204 +754,206 @@ ${prompt || "Summarize this PDF"}`
             success: false,
 
             error:
-                err.message
+                err.message ||
+                "PDF failed"
         });
     }
 });
 
 // =====================================================
-// ⚙️ MAIN AI ROUTER
+// QUIZ GENERATION ROUTE
 // =====================================================
 
-app.post("/ai", async (req, res) => {
+app.post(
+    "/generate-quiz",
 
-    try {
+    async (req, res) => {
 
-        const {
-            prompt,
-            mode
-        } = req.body;
+        try {
 
-        if (!prompt) {
+            const subject =
+                await runQuizGenerationPipeline();
 
-            return res.status(400).json({
+            return res.json({
+
+                success: true,
+
+                message:
+`Quiz deployed for ${subject}`
+            });
+
+        } catch (err) {
+
+            console.log(
+                "❌ Quiz Route Error:",
+                err.response?.data ||
+                err.message
+            );
+
+            return res.status(500).json({
 
                 success: false,
 
                 error:
-                    "❌ Prompt is required"
+                    "Quiz generation failed"
             });
         }
-
-        console.log(
-            "📥 Incoming AI Request:",
-            prompt
-        );
-
-        // =================================================
-        // EXAM MODE
-        // =================================================
-
-        if (mode === "exam") {
-
-            const result =
-                await examSolver(prompt);
-
-            return res.json({
-
-                success: true,
-
-                type: "exam",
-
-                result,
-
-                time:
-                    TimeCore.now()
-            });
-        }
-
-        // =================================================
-        // IMAGE MODE
-        // =================================================
-
-        if (mode === "image") {
-
-            const image =
-                await generateImage(prompt);
-
-            return res.json({
-
-                success: true,
-
-                type: "image",
-
-                image:
-                    image.filepath,
-
-                enhanced_prompt:
-                    image.enhancedPrompt,
-
-                time:
-                    TimeCore.now()
-            });
-        }
-
-        // =================================================
-        // MATH MODE
-        // =================================================
-
-        if (isMath(prompt)) {
-
-            const solution =
-                await solveMath(prompt);
-
-            const image =
-                await mathToImage(solution);
-
-            return res.json({
-
-                success: true,
-
-                type:
-                    "math-combo",
-
-                result:
-                    solution,
-
-                image:
-                    image.filepath,
-
-                time:
-                    TimeCore.now()
-            });
-        }
-
-        // =================================================
-        // NORMAL AI MODE
-        // =================================================
-
-        const result =
-            await normalAI(prompt);
-
-        return res.json({
-
-            success: true,
-
-            type: "text",
-
-            result,
-
-            time:
-                TimeCore.now()
-        });
-
-    } catch (err) {
-
-        console.log(
-            "❌ AI Route Error:",
-            err.response?.data ||
-            err.message
-        );
-
-        return res.status(500).json({
-
-            success: false,
-
-            error:
-                err.message
-        });
     }
-});
+);
 
 // =====================================================
-// ⏰ DAILY WAT QUIZ SCHEDULER
+// QUIZ ENGINE
 // =====================================================
 
-let quizLock = false;
+async function runQuizGenerationPipeline() {
+
+    const subjects = [
+
+        "Mathematics",
+        "Physics",
+        "Chemistry",
+        "Biology",
+        "English Language"
+    ];
+
+    const randomSubject =
+        subjects[
+            Math.floor(
+                Math.random() *
+                subjects.length
+            )
+        ];
+
+    const prompt =
+`Generate exactly 5 Post-UTME multiple choice questions for ${randomSubject}.
+
+Return ONLY JSON:
+
+{
+  "subject": "${randomSubject}",
+  "quizText": "formatted quiz",
+  "answers": ["A","B","C","D","A"]
+}`;
+
+    const resultJson =
+        await callGemini(
+
+            [
+                {
+                    parts: [
+                        {
+                            text: prompt
+                        }
+                    ]
+                }
+            ],
+
+            true
+        );
+
+    const quizData =
+        JSON.parse(resultJson);
+
+    await axios.post(
+
+        "https://jarvisaiserver.onrender.com/webhook/trigger-quiz",
+
+        {
+            subject:
+                quizData.subject,
+
+            quizText:
+                quizData.quizText,
+
+            answers:
+                quizData.answers
+        },
+
+        {
+            timeout: 30000
+        }
+    );
+
+    return randomSubject;
+}
+
+// =====================================================
+// AUTO QUIZ CLOCK
+// =====================================================
+
+let quizFiredToday = false;
 
 setInterval(async () => {
 
     try {
 
-        const {
-            hour,
-            minute
-        } = TimeCore.clock();
+        const currentDate =
+            new Date();
+
+        const currentHour =
+            new Intl.DateTimeFormat(
+                "en-GB",
+                {
+                    timeZone:
+                        "Africa/Lagos",
+
+                    hour:
+                        "2-digit",
+
+                    hour12: false
+                }
+            ).format(currentDate);
+
+        const currentMinute =
+            new Intl.DateTimeFormat(
+                "en-GB",
+                {
+                    timeZone:
+                        "Africa/Lagos",
+
+                    minute:
+                        "2-digit"
+                }
+            ).format(currentDate);
 
         if (
-            hour === "19" &&
-            minute === "00"
+            currentHour === "19" &&
+            currentMinute === "00"
         ) {
 
-            if (!quizLock) {
+            if (!quizFiredToday) {
 
-                quizLock = true;
+                quizFiredToday = true;
 
                 console.log(
-                    "⏰ DAILY QUIZ GENERATION RUNNING..."
+                    "⏰ Running DAILY scheduled quiz..."
                 );
 
-                await callGemini([
-                    {
-                        parts: [
-                            {
-                                text:
-"Generate a daily WAEC/Post-UTME quiz"
-                            }
-                        ]
-                    }
-                ]);
+                const subject =
+                    await runQuizGenerationPipeline();
+
+                console.log(
+                    `✅ Quiz completed for ${subject}`
+                );
             }
 
         } else {
 
-            quizLock = false;
+            if (quizFiredToday) {
+
+                quizFiredToday = false;
+
+                console.log(
+                    "🔄 Daily quiz lock reset"
+                );
+            }
         }
 
     } catch (err) {
 
         console.log(
-            "❌ Scheduler Error:",
+            "⚠️ Quiz Clock Error:",
+            err.response?.data ||
             err.message
         );
     }
@@ -825,17 +961,12 @@ setInterval(async () => {
 }, 60000);
 
 // =====================================================
-// 🚀 START SERVER
+// START SERVER
 // =====================================================
 
 app.listen(PORT, () => {
 
     console.log(
-`🚀 JARVIS AI CORE RUNNING ON PORT ${PORT}`
-    );
-
-    console.log(
-`🌍 LOCAL:
-http://localhost:${PORT}`
+        `🚀 JARVIS RUNNING ON PORT ${PORT}`
     );
 });
