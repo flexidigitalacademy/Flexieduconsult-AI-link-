@@ -5,6 +5,7 @@ const axios = require("axios");
 const pdfParse = require("pdf-parse");
 const sharp = require("sharp");
 const fs = require("fs");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,12 +15,12 @@ const PORT = process.env.PORT || 3000;
 // =====================================================
 
 app.use(express.json({
-    limit: "15mb"
+    limit: "20mb"
 }));
 
 app.use(express.urlencoded({
     extended: true,
-    limit: "15mb"
+    limit: "20mb"
 }));
 
 // =====================================================
@@ -42,6 +43,8 @@ const TimeCore = {
                 hour: "2-digit",
                 minute: "2-digit",
 
+                second: "2-digit",
+
                 hour12: true
             }
         ).format(new Date());
@@ -54,9 +57,7 @@ const TimeCore = {
                 "en-GB",
                 {
                     timeZone: "Africa/Lagos",
-
                     hour: "2-digit",
-
                     hour12: false
                 }
             ).format(new Date());
@@ -66,7 +67,6 @@ const TimeCore = {
                 "en-GB",
                 {
                     timeZone: "Africa/Lagos",
-
                     minute: "2-digit"
                 }
             ).format(new Date());
@@ -94,12 +94,12 @@ const API_KEYS = [
 
 let keyIndex = 0;
 
-const getKey = () => {
+function getKey() {
 
     if (!API_KEYS.length) {
 
         throw new Error(
-            "No Gemini API Keys Found"
+            "❌ No Gemini API Keys Found"
         );
     }
 
@@ -109,7 +109,7 @@ const getKey = () => {
         (keyIndex + 1) % API_KEYS.length;
 
     return key;
-};
+}
 
 async function callGemini(
     contents,
@@ -173,7 +173,7 @@ async function callGemini(
             lastError = err;
 
             console.log(
-                "Gemini Error:",
+                "❌ Gemini Error:",
                 err.response?.data ||
                 err.message
             );
@@ -203,9 +203,11 @@ You are a professional AI image prompt engineer.
 Convert user prompts into ultra-detailed cinematic prompts.
 
 RULES:
-- Expand lighting, environment, camera details
-- Make it realistic and cinematic
-- Add depth and realism
+- Expand lighting
+- Expand environment
+- Expand realism
+- Add camera details
+- Add cinematic depth
 - Keep original meaning
 - Output ONLY improved prompt
 
@@ -228,7 +230,7 @@ ${prompt}
 }
 
 // =====================================================
-// 🎨 IMAGE CORE (FLUX)
+// 🎨 IMAGE GENERATION CORE
 // =====================================================
 
 async function generateImage(prompt) {
@@ -258,17 +260,22 @@ async function generateImage(prompt) {
             }
         );
 
-    const file =
-        `./image-${Date.now()}.png`;
+    const filename =
+        `image-${Date.now()}.png`;
+
+    const filepath =
+        path.join(__dirname, filename);
 
     fs.writeFileSync(
-        file,
+        filepath,
         response.data
     );
 
     return {
-        file,
-        prompt: improvedPrompt
+        filepath,
+        filename,
+        enhancedPrompt:
+            improvedPrompt
     };
 }
 
@@ -293,8 +300,8 @@ You are a WAEC/JAMB mathematics expert.
 
 RULES:
 - Solve step-by-step
-- Be beginner friendly
-- Explain clearly
+- Beginner friendly
+- Educational
 - NO LATEX
 - Use Unicode symbols:
 √ π ± ² ³
@@ -377,16 +384,22 @@ async function mathToImage(text) {
     </svg>
     `;
 
-    const file =
-        `./math-${Date.now()}.png`;
+    const filename =
+        `math-${Date.now()}.png`;
+
+    const filepath =
+        path.join(__dirname, filename);
 
     await sharp(
         Buffer.from(svg)
     )
         .png()
-        .toFile(file);
+        .toFile(filepath);
 
-    return file;
+    return {
+        filepath,
+        filename
+    };
 }
 
 // =====================================================
@@ -422,6 +435,107 @@ ${question}
 }
 
 // =====================================================
+// 🧠 GENERAL AI CHAT
+// =====================================================
+
+async function normalAI(prompt) {
+
+    return await callGemini([
+
+        {
+            parts: [
+                {
+                    text:
+`You are JARVIS AI.
+
+Be intelligent,
+educational,
+helpful,
+friendly,
+and conversational.
+
+NO LATEX.
+
+Use Unicode symbols:
+√ π ± ² ³
+
+USER:
+${prompt}`
+                }
+            ]
+        }
+    ]);
+}
+
+// =====================================================
+// 🏠 ROOT ROUTE
+// =====================================================
+
+app.get("/", (req, res) => {
+
+    res.send(`
+
+        <h1>🤖 JARVIS AI CORE</h1>
+
+        <p>STATUS: ONLINE</p>
+
+        <p>TIME: ${TimeCore.now()}</p>
+
+        <hr>
+
+        <h3>AVAILABLE ROUTES</h3>
+
+        <ul>
+            <li>GET /</li>
+            <li>GET /test</li>
+            <li>GET /debug-ai</li>
+            <li>POST /ai</li>
+            <li>POST /pdf</li>
+        </ul>
+
+    `);
+});
+
+// =====================================================
+// 🧪 TEST ROUTE
+// =====================================================
+
+app.get("/test", (req, res) => {
+
+    res.json({
+
+        success: true,
+
+        message:
+            "✅ JARVIS server working",
+
+        time:
+            TimeCore.now()
+    });
+});
+
+// =====================================================
+// 🧪 DEBUG ROUTE
+// =====================================================
+
+app.get("/debug-ai", (req, res) => {
+
+    res.json({
+
+        success: true,
+
+        status:
+            "✅ AI ROUTE ONLINE",
+
+        gemini_keys_loaded:
+            API_KEYS.length,
+
+        server_time:
+            TimeCore.now()
+    });
+});
+
+// =====================================================
 // 📄 PDF ANALYZER
 // =====================================================
 
@@ -441,7 +555,7 @@ app.post("/pdf", async (req, res) => {
                 success: false,
 
                 error:
-                    "No PDF provided"
+                    "❌ No PDF provided"
             });
         }
 
@@ -459,7 +573,7 @@ app.post("/pdf", async (req, res) => {
         const pdfData =
             await pdfParse(buffer);
 
-        const text =
+        const extractedText =
             pdfData.text || "";
 
         const result =
@@ -469,12 +583,13 @@ app.post("/pdf", async (req, res) => {
                     parts: [
                         {
                             text:
-`Analyze this PDF document:
+`Analyze this PDF carefully.
 
-${text}
+PDF CONTENT:
+${extractedText}
 
-User Request:
-${prompt || "Summarize"}`
+USER REQUEST:
+${prompt || "Summarize this PDF"}`
                         }
                     ]
                 }
@@ -483,6 +598,8 @@ ${prompt || "Summarize"}`
         return res.json({
 
             success: true,
+
+            type: "pdf",
 
             result,
 
@@ -493,7 +610,8 @@ ${prompt || "Summarize"}`
     } catch (err) {
 
         console.log(
-            "PDF Error:",
+            "❌ PDF Error:",
+            err.response?.data ||
             err.message
         );
 
@@ -520,6 +638,22 @@ app.post("/ai", async (req, res) => {
             mode
         } = req.body;
 
+        if (!prompt) {
+
+            return res.status(400).json({
+
+                success: false,
+
+                error:
+                    "❌ Prompt is required"
+            });
+        }
+
+        console.log(
+            "📥 Incoming AI Request:",
+            prompt
+        );
+
         // =================================================
         // EXAM MODE
         // =================================================
@@ -535,7 +669,7 @@ app.post("/ai", async (req, res) => {
 
                 type: "exam",
 
-                text: result,
+                result,
 
                 time:
                     TimeCore.now()
@@ -548,7 +682,7 @@ app.post("/ai", async (req, res) => {
 
         if (mode === "image") {
 
-            const img =
+            const image =
                 await generateImage(prompt);
 
             return res.json({
@@ -558,10 +692,10 @@ app.post("/ai", async (req, res) => {
                 type: "image",
 
                 image:
-                    img.file,
+                    image.filepath,
 
                 enhanced_prompt:
-                    img.prompt,
+                    image.enhancedPrompt,
 
                 time:
                     TimeCore.now()
@@ -569,7 +703,7 @@ app.post("/ai", async (req, res) => {
         }
 
         // =================================================
-        // AUTO MATH MODE
+        // MATH MODE
         // =================================================
 
         if (isMath(prompt)) {
@@ -587,10 +721,11 @@ app.post("/ai", async (req, res) => {
                 type:
                     "math-combo",
 
-                text:
+                result:
                     solution,
 
-                image,
+                image:
+                    image.filepath,
 
                 time:
                     TimeCore.now()
@@ -602,28 +737,7 @@ app.post("/ai", async (req, res) => {
         // =================================================
 
         const result =
-            await callGemini([
-
-                {
-                    parts: [
-                        {
-                            text:
-`You are JARVIS AI.
-
-Be intelligent, educational,
-helpful and conversational.
-
-NO LATEX.
-
-Use Unicode symbols:
-√ π ± ² ³
-
-User:
-${prompt}`
-                        }
-                    ]
-                }
-            ]);
+            await normalAI(prompt);
 
         return res.json({
 
@@ -631,7 +745,7 @@ ${prompt}`
 
             type: "text",
 
-            text: result,
+            result,
 
             time:
                 TimeCore.now()
@@ -640,7 +754,8 @@ ${prompt}`
     } catch (err) {
 
         console.log(
-            "AI Route Error:",
+            "❌ AI Route Error:",
+            err.response?.data ||
             err.message
         );
 
@@ -655,38 +770,7 @@ ${prompt}`
 });
 
 // =====================================================
-// 🏠 SYSTEM ROUTES
-// =====================================================
-
-app.get("/", (req, res) => {
-
-    res.send(`
-
-        <h1>
-            🤖 JARVIS AI CORE
-        </h1>
-
-        <p>
-            STATUS: ONLINE
-        </p>
-
-        <p>
-            WAT TIME:
-            ${TimeCore.now()}
-        </p>
-
-    `);
-});
-
-app.get("/test", (req, res) => {
-
-    res.json({
-        ok: true
-    });
-});
-
-// =====================================================
-// ⏰ WAT SCHEDULER
+// ⏰ DAILY WAT QUIZ SCHEDULER
 // =====================================================
 
 let quizLock = false;
@@ -710,7 +794,7 @@ setInterval(async () => {
                 quizLock = true;
 
                 console.log(
-                    "⏰ WAT QUIZ RUNNING..."
+                    "⏰ DAILY QUIZ GENERATION RUNNING..."
                 );
 
                 await callGemini([
@@ -733,7 +817,7 @@ setInterval(async () => {
     } catch (err) {
 
         console.log(
-            "Scheduler Error:",
+            "❌ Scheduler Error:",
             err.message
         );
     }
@@ -747,6 +831,11 @@ setInterval(async () => {
 app.listen(PORT, () => {
 
     console.log(
-`🚀 JARVIS CORE RUNNING ON PORT ${PORT}`
+`🚀 JARVIS AI CORE RUNNING ON PORT ${PORT}`
+    );
+
+    console.log(
+`🌍 LOCAL:
+http://localhost:${PORT}`
     );
 });
