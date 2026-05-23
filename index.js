@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 // =====================================================
 
 app.use(express.json({ limit: "15mb" }));
+
 app.use(express.urlencoded({
     extended: true,
     limit: "15mb"
@@ -40,7 +41,10 @@ let keyIndex = 0;
 const getNextKey = () => {
 
     if (!API_KEYS.length) {
-        throw new Error("No Gemini API Keys Found");
+
+        throw new Error(
+            "No Gemini API Keys Found"
+        );
     }
 
     const key = API_KEYS[keyIndex];
@@ -52,7 +56,7 @@ const getNextKey = () => {
 };
 
 // =====================================================
-// GEMINI REQUEST ENGINE
+// GEMINI REQUEST ENGINE (UPDATED/FIXED)
 // =====================================================
 
 async function callGemini(
@@ -72,7 +76,10 @@ async function callGemini(
                 contents
             };
 
-            // Force JSON response if needed
+            // =================================================
+            // FORCE JSON OUTPUT
+            // =================================================
+
             if (isJson) {
 
                 payload.generationConfig = {
@@ -82,10 +89,15 @@ async function callGemini(
                 };
             }
 
+            // =================================================
+            // GEMINI REQUEST
+            // =================================================
+
             const response =
                 await axios.post(
 
-                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
+                    // ✅ FIXED MODEL
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
 
                     payload,
 
@@ -99,28 +111,47 @@ async function callGemini(
                     }
                 );
 
+            // =================================================
+            // SAFE EXTRACTION
+            // =================================================
+
             const text =
                 response.data
                     ?.candidates?.[0]
                     ?.content?.parts?.[0]
                     ?.text;
 
-            if (text) {
-                return text;
+            if (
+                text &&
+                typeof text === "string"
+            ) {
+
+                return text.trim();
             }
+
+            console.log(
+                "⚠️ Gemini returned empty response"
+            );
 
         } catch (err) {
 
             lastError = err;
 
+            // ✅ DETAILED LOGGING
             console.log(
-                `⚠️ Gemini key ${i + 1} failed. Rotating...`
+                `⚠️ Gemini key ${i + 1} failed:`,
+                err.response?.data ||
+                err.message
             );
         }
     }
 
     throw new Error(
+
+        lastError?.response?.data?.error?.message ||
+
         lastError?.message ||
+
         "Gemini request failed"
     );
 }
@@ -239,6 +270,55 @@ app.get("/test", (req, res) => {
 });
 
 // =====================================================
+// DEBUG GEMINI ROUTE
+// =====================================================
+
+app.get("/debug-ai", async (req, res) => {
+
+    try {
+
+        const result =
+            await callGemini([
+
+                {
+                    parts: [
+                        {
+                            text: "hello"
+                        }
+                    ]
+                }
+            ]);
+
+        res.send(`
+            <h2>✅ GEMINI WORKING</h2>
+            <pre>${result}</pre>
+        `);
+
+    } catch (err) {
+
+        res.send(`
+
+            <h2>❌ GEMINI ERROR</h2>
+
+            <pre>
+
+${JSON.stringify(
+
+    err.response?.data ||
+
+    err.message,
+
+    null,
+    2
+
+)}
+
+            </pre>
+        `);
+    }
+});
+
+// =====================================================
 // AI ROUTE
 // =====================================================
 
@@ -267,6 +347,10 @@ ${prompt || "Analyze this"}`
             }
         ];
 
+        // =================================================
+        // IMAGE SUPPORT
+        // =================================================
+
         if (image) {
 
             parts.push({
@@ -284,6 +368,10 @@ ${prompt || "Analyze this"}`
             });
         }
 
+        // =================================================
+        // GEMINI CALL
+        // =================================================
+
         const result =
             await callGemini([
                 { parts }
@@ -300,7 +388,8 @@ ${prompt || "Analyze this"}`
     } catch (err) {
 
         console.log(
-            "❌ AI Route Error:",
+            "❌ AI Route FULL Error:",
+            err.response?.data ||
             err.message
         );
 
@@ -308,7 +397,9 @@ ${prompt || "Analyze this"}`
 
             success: false,
 
-            error: "AI failed"
+            error:
+                err.message ||
+                "AI failed"
         });
     }
 });
@@ -377,32 +468,6 @@ OR
   "action": "CORRECT"
 }
 
-EXAMPLES:
-
-"omo this assignment hard"
-→ IGNORE
-
-"abeg who get answer"
-→ IGNORE
-
-"I no understand this question"
-→ IGNORE
-
-"Shey you dey come today?"
-→ IGNORE
-
-"pls can u help me"
-→ IGNORE
-
-"He go school yesterday"
-→ CORRECT
-
-"Does people knows the answer?"
-→ CORRECT
-
-"I am goinged to school"
-→ CORRECT
-
 USER:
 ${text}`;
 
@@ -439,10 +504,6 @@ ${text}`;
             });
         }
 
-        // =================================================
-        // IGNORE CASUAL MESSAGE
-        // =================================================
-
         if (
             judgeParsed.action === "IGNORE"
         ) {
@@ -463,29 +524,10 @@ ${text}`;
         const correctionPrompt =
 `You are an advanced grammar correction engine.
 
-Your task:
-- Correct serious grammar mistakes
-- Correct spelling mistakes
-- Fix broken English naturally
-- Preserve original meaning
-
-RULES:
-- Return ONLY JSON
-- No markdown
-- No explanations
-- No extra text
-
-RESPONSE FORMAT:
+Return ONLY JSON.
 
 {
   "type": "grammar",
-  "reply": "Corrected sentence"
-}
-
-OR
-
-{
-  "type": "spelling",
   "reply": "Corrected sentence"
 }
 
@@ -530,10 +572,6 @@ ${text}`;
             });
         }
 
-        // =================================================
-        // VALIDATION
-        // =================================================
-
         if (
             !parsed.reply ||
             parsed.reply
@@ -552,10 +590,6 @@ ${text}`;
             });
         }
 
-        // =================================================
-        // SUCCESS
-        // =================================================
-
         return res.json({
 
             success: true,
@@ -571,6 +605,7 @@ ${text}`;
 
         console.log(
             "❌ Grammar Route Error:",
+            err.response?.data ||
             err.message
         );
 
@@ -710,6 +745,7 @@ ${prompt || "Summarize"}`
 
         console.log(
             "❌ PDF Route Error:",
+            err.response?.data ||
             err.message
         );
 
@@ -718,6 +754,7 @@ ${prompt || "Summarize"}`
             success: false,
 
             error:
+                err.message ||
                 "PDF failed"
         });
     }
@@ -749,6 +786,7 @@ app.post(
 
             console.log(
                 "❌ Quiz Route Error:",
+                err.response?.data ||
                 err.message
             );
 
@@ -840,7 +878,7 @@ Return ONLY JSON:
 }
 
 // =====================================================
-// AUTO QUIZ CLOCK (DAILY 7PM WAT)
+// AUTO QUIZ CLOCK
 // =====================================================
 
 let quizFiredToday = false;
@@ -878,10 +916,6 @@ setInterval(async () => {
                 }
             ).format(currentDate);
 
-        // =================================================
-        // FIRE QUIZ EVERYDAY BY 7PM
-        // =================================================
-
         if (
             currentHour === "19" &&
             currentMinute === "00"
@@ -905,7 +939,6 @@ setInterval(async () => {
 
         } else {
 
-            // RESET AFTER 7PM WINDOW PASSES
             if (quizFiredToday) {
 
                 quizFiredToday = false;
@@ -920,9 +953,9 @@ setInterval(async () => {
 
         console.log(
             "⚠️ Quiz Clock Error:",
+            err.response?.data ||
             err.message
         );
-
     }
 
 }, 60000);
@@ -937,4 +970,3 @@ app.listen(PORT, () => {
         `🚀 JARVIS RUNNING ON PORT ${PORT}`
     );
 });
-                
