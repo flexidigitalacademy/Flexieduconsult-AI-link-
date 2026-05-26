@@ -28,7 +28,10 @@ const API_KEYS = [
     process.env.GEMINI_API_KEY_2,
     process.env.GEMINI_API_KEY_3,
     process.env.GEMINI_API_KEY_4,
-    process.env.GEMINI_API_KEY_5
+    process.env.GEMINI_API_KEY_5,
+    process.env.GEMINI_API_KEY_6,
+    process.env.GEMINI_API_KEY_7,
+    process.env.GEMINI_API_KEY_8
 
 ].filter(Boolean);
 
