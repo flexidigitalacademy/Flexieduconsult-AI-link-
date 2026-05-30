@@ -408,6 +408,24 @@ ${prompt || "Analyze this"}`
 });
 
 // =====================================================
+// NEW WEB-CHAT ROUTE
+// =====================================================
+app.post("/web-chat", async (req, res) => {
+    try {
+        const { prompt } = req.body;
+        if (!prompt) return res.status(400).json({ error: "Prompt required" });
+
+        const result = await callGemini([{ parts: [{ text: prompt }] }]);
+        
+        // Clean JSON response for your web interface
+        res.json({ reply: result });
+    } catch (err) {
+        console.error("Web-chat Error:", err);
+        res.status(500).json({ error: "Server failed" });
+    }
+});
+
+// =====================================================
 // SMART GRAMMAR ROUTE
 // =====================================================
 
