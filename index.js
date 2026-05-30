@@ -3,8 +3,10 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const pdfParse = require("pdf-parse");
+const cors = require("cors"); // <--- ADD THIS
 
 const app = express();
+app.use(cors());
 const PORT = process.env.PORT || 3000;
 
 // =====================================================
