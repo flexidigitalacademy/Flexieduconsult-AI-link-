@@ -381,42 +381,6 @@ ${prompt || "Analyze this"}`
     }
 });
 
-        // =================================================
-        // GEMINI CALL
-        // =================================================
-
-        const result =
-            await callGemini([
-                { parts }
-            ]);
-
-        return res.json({
-
-            success: true,
-
-            result:
-                result || "No response"
-        });
-
-    } catch (err) {
-
-        console.log(
-            "❌ AI Route FULL Error:",
-            err.response?.data ||
-            err.message
-        );
-
-        return res.status(500).json({
-
-            success: false,
-
-            error:
-                err.message ||
-                "AI failed"
-        });
-    }
-});
-
 // =====================================================
 // NEW WEB-CHAT ROUTE
 // =====================================================
